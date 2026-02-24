@@ -1,38 +1,30 @@
 services:
   mongodb:
+    container_name: MongoDB
     image: mongo:latest
-    container_name: my-mongodb
     restart: unless-stopped
     ports:
       - "27017:27017"
     environment:
-      MONGO_INITDB_ROOT_USERNAME: admin
-      MONGO_INITDB_ROOT_PASSWORD: password123
-      MONGO_INITDB_DATABASE: myapp
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD}
+      MONGO_INITDB_DATABASE: ${MONGO_DB}
     volumes:
       - mongo-data:/data/db
     networks:
       - app-network
-    healthcheck:
-      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
 
   go-app:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: my-go-app
+    container_name: GOProject
+    build: .
     restart: unless-stopped
     ports:
       - "8080:8080"
     depends_on:
-      mongodb:
-        condition: service_healthy
+      - mongodb
     environment:
-      MONGO_URI: mongodb://admin:password123@mongodb:27017
-      MONGO_DATABASE: myapp
+      MONGO_URI: mongodb://${MONGO_USER}:${MONGO_PASSWORD}@mongodb:27017
+      MONGO_DATABASE: ${MONGO_DB}
     networks:
       - app-network
 
