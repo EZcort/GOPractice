@@ -1,35 +1,56 @@
 services:
   mongodb:
-    container_name: MongoDB
+    container_name: mongodb
     image: mongo:latest
     restart: unless-stopped
     ports:
       - "27017:27017"
     environment:
-      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER}
-      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD}
-      MONGO_INITDB_DATABASE: ${MONGO_DB}
+      MONGO_INITDB_ROOT_USERNAME: poorman
+      MONGO_INITDB_ROOT_PASSWORD: mega_night67
+      MONGO_INITDB_DATABASE: fake_db
     volumes:
       - mongo-data:/data/db
     networks:
       - app-network
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   go-app:
-    container_name: GOProject
+    container_name: go_project
     build: .
     restart: unless-stopped
     ports:
       - "8080:8080"
     depends_on:
-      - mongodb
+      mongodb:
+        condition: service_healthy
     environment:
-      MONGO_URI: mongodb://${MONGO_USER}:${MONGO_PASSWORD}@mongodb:27017
-      MONGO_DATABASE: ${MONGO_DB}
+      MONGO_URI: mongodb://poorman:mega_night67@mongodb:27017/fake_db?authSource=admin
+      MONGO_DATABASE: fake_db
+    networks:
+      - app-network
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus:/etc/prometheus:ro
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
     networks:
       - app-network
 
 volumes:
   mongo-data:
+  prometheus-data:
 
 networks:
   app-network:
+    driver: bridge

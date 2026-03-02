@@ -1,0 +1,19 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: 'prometheus'
+    scrape_interval: 15s      
+    scrape_timeout: 15s      
+    static_configs:          
+      - targets: ['localhost:9090']
+
+  - job_name: 'go-app'
+    scrape_interval: 10s
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['go_project:8080']
+        labels:
+          app: 'go-project'
+          environment: 'production'
