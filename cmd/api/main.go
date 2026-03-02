@@ -2,8 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
-
 	// "fmt"
 	"letsgo/config"
 	"log"
@@ -26,7 +24,7 @@ func main() {
 
 	db.InitMongoDB(client, cfg)
 
-	fmt.Printf("Ручки:\nhttp://localhost:8080/get/Active/\nhttp://localhost:8080/get/process/\nhttp://localhost:8080/get/Uuids\nhttp://localhost:8080/get/\nhttp://localhost:8080/get/metrics\n")
+	// fmt.Printf("Ручки:\nhttp://localhost:8080/get/Active/\nhttp://localhost:8080/get/process/\nhttp://localhost:8080/get/uuids\nhttp://localhost:8080/get/CSV/\nhttp://localhost:8080/get/metrics\n")
 
 	getGroup := http.NewServeMux()
 	getGroup.HandleFunc("/Activate", func(w http.ResponseWriter, r *http.Request) {
