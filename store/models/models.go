@@ -1,8 +1,9 @@
 package models
 
-type JSONLRecord struct {
+type JSONRecord struct {
 	UUID              string `json:"uuid"`
 	FiscalDriveNumber string `json:"fiscalDriveNumber"`
+	Status            string `json:"status"`
 }
 
 type CSVRecord struct {

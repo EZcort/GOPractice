@@ -9,7 +9,6 @@ import (
 
 	handlers "letsgo/internal/app/delivery/http"
 	db "letsgo/pkg/datasources"
-	files "letsgo/pkg/utils"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
@@ -24,16 +23,16 @@ func main() {
 
 	db.InitMongoDB(client, cfg)
 
-	go fmt.Printf("Ручки:\nhttp://localhost:8080/get/Activate\nhttp://localhost:8080/get/process/\nhttp://localhost:8080/get/uuids\nhttp://localhost:8080/get/CSV/\nhttp://localhost:8080/get/metrics\n")
+	go fmt.Printf("Ручки:\nhttp://localhost:8080/api/activate\nhttp://localhost:8080/api/process/\nhttp://localhost:8080/api/uuids\nhttp://localhost:8080/api/CSV/\nhttp://localhost:8080/api/metrics\n")
 
-	getGroup := http.NewServeMux()
-	getGroup.HandleFunc("/Activate", func(w http.ResponseWriter, r *http.Request) {
-		go files.ReadXLSXandMatch("docs/book.xlsx", client, cfg.MongoDB.Database)
-	})
-	getGroup.HandleFunc("/process/", handlers.GetUuid4)
-	getGroup.HandleFunc("/uuids", handlers.GetUuids)
-	getGroup.HandleFunc("/CSV/", handlers.GetCSV)
-	getGroup.Handle("/metrics", promhttp.Handler())
-	getGroup.Handle("/get/", http.StripPrefix("/get", getGroup))
-	log.Fatal(http.ListenAndServe(":"+cfg.Server.Port, getGroup))
+	apiMux := http.NewServeMux()
+	apiMux.HandleFunc("/activate", handlers.LoadData(client, cfg.MongoDB.Database))
+	apiMux.HandleFunc("/process/", handlers.GetUuid4)
+	apiMux.HandleFunc("/uuids", handlers.GetUuids)
+	apiMux.HandleFunc("/CSV/", handlers.GetCSV)
+	apiMux.Handle("/metrics", promhttp.Handler())
+
+	http.Handle("/api/", http.StripPrefix("/api", apiMux))
+
+	log.Fatal(http.ListenAndServe(":"+cfg.Server.Port, nil))
 }

@@ -1,15 +1,88 @@
 package http
 
 import (
-	"encoding/csv"
 	"encoding/json"
+	"io"
+	"log"
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
-	constants "letsgo/pkg/constants"
-	models "letsgo/store/models"
+	"letsgo/pkg/utils"
+	"letsgo/store/models"
+
+	"go.mongodb.org/mongo-driver/mongo"
 )
+
+func LoadData(client *mongo.Client, dbName string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Метод не поддерживается", http.StatusMethodNotAllowed)
+			return
+		}
+
+		if err := r.ParseMultipartForm(32 << 20); err != nil {
+			http.Error(w, "Ошибка при парсинге формы: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		file, header, err := r.FormFile("file")
+		if err != nil {
+			http.Error(w, "Файл не найден в запросе", http.StatusBadRequest)
+			return
+		}
+		defer file.Close()
+
+		dateFromStr := r.FormValue("date_from")
+		dateToStr := r.FormValue("date_to")
+
+		dateFrom, dateTo, err := utils.ParseDateRange(dateFromStr, dateToStr)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		if err := os.MkdirAll("docs", os.ModePerm); err != nil {
+			http.Error(w, "Ошибка при создании директории: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		timestamp := time.Now().Format("20060102_150405")
+		filename := "docs/" + timestamp + "_" + header.Filename
+
+		dst, err := os.Create(filename)
+		if err != nil {
+			http.Error(w, "Ошибка при создании файла: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		defer dst.Close()
+
+		if _, err := io.Copy(dst, file); err != nil {
+			http.Error(w, "Ошибка при сохранении файла: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		if err := utils.ReadXLSXandMatch(filename, client, dbName, dateFrom, dateTo); err != nil {
+			http.Error(w, "Ошибка при обработке файла: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		if err := os.Remove(filename); err != nil {
+			log.Printf("Не удалось удалить файл %s: %v", filename, err)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"message":   "Файл успешно загружен и обработан",
+			"filename":  header.Filename,
+			"size":      header.Size,
+			"date_from": dateFrom.Format(time.RFC3339),
+			"date_to":   dateTo.Format(time.RFC3339),
+		})
+	}
+}
 
 func GetUuid4(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
@@ -21,22 +94,27 @@ func GetUuid4(w http.ResponseWriter, r *http.Request) {
 	}
 	fiscalDriveNumber := parts[len(parts)-1]
 
-	data, err := os.ReadFile(constants.JSONLFilePath)
+	entries, err := os.ReadDir("TMP")
 	if err != nil {
 		json.NewEncoder(w).Encode([]string{})
 		return
 	}
 
-	lines := strings.Split(string(data), "\n")
 	var result []string
 
-	for _, line := range lines {
-		if line == "" {
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
 			continue
 		}
 
-		var record models.JSONLRecord
-		if err := json.Unmarshal([]byte(line), &record); err != nil {
+		filePath := "TMP/" + entry.Name()
+		data, err := os.ReadFile(filePath)
+		if err != nil {
+			continue
+		}
+
+		var record models.JSONRecord
+		if err := json.Unmarshal(data, &record); err != nil {
 			continue
 		}
 
@@ -50,23 +128,27 @@ func GetUuid4(w http.ResponseWriter, r *http.Request) {
 
 func GetUuids(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-
-	data, err := os.ReadFile(constants.JSONLFilePath)
+	entries, err := os.ReadDir("TMP")
 	if err != nil {
 		json.NewEncoder(w).Encode([]string{})
 		return
 	}
 
-	lines := strings.Split(string(data), "\n")
 	uniq := make(map[string]bool)
 
-	for _, line := range lines {
-		if line == "" {
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
 			continue
 		}
 
-		var record models.JSONLRecord
-		if err := json.Unmarshal([]byte(line), &record); err != nil {
+		filePath := "TMP" + entry.Name()
+		data, err := os.ReadFile(filePath)
+		if err != nil {
+			continue
+		}
+
+		var record models.JSONRecord
+		if err := json.Unmarshal(data, &record); err != nil {
 			continue
 		}
 
@@ -84,11 +166,9 @@ func GetUuids(w http.ResponseWriter, r *http.Request) {
 }
 
 func GetCSV(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-
 	parts := strings.Split(r.URL.Path, "/")
 	if len(parts) < 2 {
-		json.NewEncoder(w).Encode([]models.CSVRecord{})
+		http.Error(w, "UUID не указан", http.StatusBadRequest)
 		return
 	}
 
@@ -97,27 +177,21 @@ func GetCSV(w http.ResponseWriter, r *http.Request) {
 
 	file, err := os.Open(csvPath)
 	if err != nil {
-		json.NewEncoder(w).Encode([]models.CSVRecord{})
+		if os.IsNotExist(err) {
+			http.Error(w, "Файл не найден", http.StatusNotFound)
+		} else {
+			http.Error(w, "Ошибка при открытии файла", http.StatusInternalServerError)
+		}
 		return
 	}
 	defer file.Close()
 
-	records, err := csv.NewReader(file).ReadAll()
+	fileInfo, err := file.Stat()
 	if err != nil {
-		json.NewEncoder(w).Encode([]models.CSVRecord{})
+		http.Error(w, "Ошибка при получении информации о файле", http.StatusInternalServerError)
 		return
 	}
 
-	var result []models.CSVRecord
-	for _, r := range records {
-		if len(r) >= 3 {
-			result = append(result, models.CSVRecord{
-				FiscalDriveNumber:    r[0],
-				FiscalDocumentNumber: r[1],
-				Items:                r[2],
-			})
-		}
-	}
-
-	json.NewEncoder(w).Encode(result)
+	w.Header().Set("Content-Disposition", "attachment; filename="+uuid+".csv")
+	http.ServeContent(w, r, uuid+".csv", fileInfo.ModTime(), file)
 }

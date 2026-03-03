@@ -24,6 +24,7 @@ require (
 )
 
 require (
+	github.com/araddon/dateparse v0.0.0-20210429162001-6b43995a97de
 	github.com/golang/snappy v1.0.0 // indirect
 	github.com/google/uuid v1.6.0
 	github.com/klauspost/compress v1.18.4 // indirect

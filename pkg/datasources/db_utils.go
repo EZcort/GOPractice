@@ -3,6 +3,7 @@ package db_utils
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"letsgo/config"
 	"log"
 	"os"
@@ -61,29 +62,27 @@ func InitMongoDB(client *mongo.Client, cfg *config.Config) error {
 	return nil
 }
 
-func FindInMongo(collection *mongo.Collection, fdNumber string) ([]bson.M, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+func FindInMongo(collection *mongo.Collection, fiscalDriveNumber string, dateFrom, dateTo time.Time) ([]bson.M, error) {
+	fmt.Printf("Поиск по датам: %v, %v\n", dateFrom, dateTo)
 
-	pattern := "^" + fdNumber[:len(fdNumber)-2]
 	filter := bson.M{
-		"$and": []bson.M{
-			{"doc.fiscalDriveNumber": bson.M{
-				"$regex": pattern}},
-			// {"doc.DateTime": дата},
+		"doc.fiscalDriveNumber": fiscalDriveNumber,
+		"doc.dateTime": bson.M{
+			"$gte": dateFrom,
+			"$lte": dateTo,
 		},
 	}
 
-	cursor, err := collection.Find(ctx, filter)
+	cursor, err := collection.Find(context.Background(), filter)
 	if err != nil {
 		return nil, err
 	}
-	defer cursor.Close(ctx)
+	defer cursor.Close(context.Background())
 
-	var docs []bson.M
-	err = cursor.All(ctx, &docs)
-	if err != nil {
+	var results []bson.M
+	if err = cursor.All(context.Background(), &results); err != nil {
 		return nil, err
 	}
-	return docs, nil
+
+	return results, nil
 }
