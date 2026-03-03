@@ -8,183 +8,117 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/google/uuid"
+	constants "letsgo/pkg/constants"
+	models "letsgo/store/models"
 )
-
-type CSVRecord struct {
-	FiscalDriveNumber    string `json:"fiscalDriveNumber"`
-	FiscalDocumentNumber string `json:"fiscalDocumentNumber"`
-	Items                string `json:"items"`
-}
 
 func GetUuid4(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
-	pathParts := strings.Split(r.URL.Path, "/")
-	if len(pathParts) < 3 {
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]string{
-			"error": "Не указан FiscalDriveNumber",
-		})
+	parts := strings.Split(r.URL.Path, "/")
+	if len(parts) < 3 {
+		json.NewEncoder(w).Encode([]string{})
 		return
 	}
+	fiscalDriveNumber := parts[len(parts)-1]
 
-	fiscalDriveNumber := pathParts[len(pathParts)-1]
-	if fiscalDriveNumber == "" {
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]string{
-			"error": "Не указан FiscalDriveNumber",
-		})
-		return
-	}
-
-	dirPath := "TMP/" + fiscalDriveNumber
-	if _, err := os.Stat(dirPath); os.IsNotExist(err) {
-		w.WriteHeader(http.StatusNotFound)
-		json.NewEncoder(w).Encode(map[string]string{
-			"error": "FiscalDriveNumber не найден",
-		})
-		return
-	}
-
-	files, err := os.ReadDir(dirPath)
+	data, err := os.ReadFile(constants.JSONLFilePath)
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]string{
-			"error": err.Error(),
-		})
+		json.NewEncoder(w).Encode([]string{})
 		return
 	}
 
-	var uuids []string
-	for _, file := range files {
-		if !file.IsDir() && strings.HasSuffix(strings.ToLower(file.Name()), ".csv") {
-			uuidStr := strings.TrimSuffix(file.Name(), ".csv")
-			if _, err := uuid.Parse(uuidStr); err == nil {
-				uuids = append(uuids, uuidStr)
-			}
+	lines := strings.Split(string(data), "\n")
+	var result []string
+
+	for _, line := range lines {
+		if line == "" {
+			continue
+		}
+
+		var record models.JSONLRecord
+		if err := json.Unmarshal([]byte(line), &record); err != nil {
+			continue
+		}
+
+		if record.FiscalDriveNumber == fiscalDriveNumber {
+			result = append(result, record.UUID)
 		}
 	}
 
-	json.NewEncoder(w).Encode(uuids)
+	json.NewEncoder(w).Encode(result)
 }
 
 func GetUuids(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
-	if _, err := os.Stat("TMP"); os.IsNotExist(err) {
+	data, err := os.ReadFile(constants.JSONLFilePath)
+	if err != nil {
 		json.NewEncoder(w).Encode([]string{})
 		return
 	}
 
-	dirs, err := os.ReadDir("TMP")
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]string{
-			"error": err.Error(),
-		})
-		return
-	}
+	lines := strings.Split(string(data), "\n")
+	uniq := make(map[string]bool)
 
-	var allFileNames []string
-	for _, dir := range dirs {
-		if dir.IsDir() {
-			dirPath := "TMP/" + dir.Name()
-			files, err := os.ReadDir(dirPath)
-			if err != nil {
-				continue
-			}
+	for _, line := range lines {
+		if line == "" {
+			continue
+		}
 
-			for _, file := range files {
-				if !file.IsDir() && strings.HasSuffix(strings.ToLower(file.Name()), ".csv") {
-					fileName := strings.TrimSuffix(file.Name(), ".csv")
-					allFileNames = append(allFileNames, fileName)
-				}
-			}
+		var record models.JSONLRecord
+		if err := json.Unmarshal([]byte(line), &record); err != nil {
+			continue
+		}
+
+		if record.UUID != "" {
+			uniq[record.UUID] = true
 		}
 	}
 
-	json.NewEncoder(w).Encode(allFileNames)
+	uuids := make([]string, 0, len(uniq))
+	for uuid := range uniq {
+		uuids = append(uuids, uuid)
+	}
+
+	json.NewEncoder(w).Encode(uuids)
 }
 
 func GetCSV(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
-	pathParts := strings.Split(r.URL.Path, "/")
-	if len(pathParts) < 2 {
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]string{
-			"error": "Нет Uuid",
-		})
+	parts := strings.Split(r.URL.Path, "/")
+	if len(parts) < 2 {
+		json.NewEncoder(w).Encode([]models.CSVRecord{})
 		return
 	}
 
-	fileName := pathParts[len(pathParts)-1]
-	if fileName == "" {
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]string{
-			"error": "Нет Uuid",
-		})
-		return
-	}
+	uuid := parts[len(parts)-1]
+	csvPath := filepath.Join("TMP", uuid+".csv")
 
-	if !strings.HasSuffix(strings.ToLower(fileName), ".csv") {
-		fileName = fileName + ".csv"
-	}
-
-	var foundFile string
-	err := filepath.Walk("TMP",
-
-		func(path string, info os.FileInfo, err error) error {
-			if err != nil {
-				return nil
-			}
-
-			if !info.IsDir() && info.Name() == fileName {
-				foundFile = path
-				return filepath.SkipAll
-			}
-			return nil
-		})
-
-	if err != nil || foundFile == "" {
-		w.WriteHeader(http.StatusNotFound)
-		json.NewEncoder(w).Encode(map[string]string{
-			"error": "Uuid не найден",
-		})
-		return
-	}
-
-	file, err := os.Open(foundFile)
+	file, err := os.Open(csvPath)
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]string{
-			"error": err.Error(),
-		})
+		json.NewEncoder(w).Encode([]models.CSVRecord{})
 		return
 	}
 	defer file.Close()
 
-	reader := csv.NewReader(file)
-	records, err := reader.ReadAll()
+	records, err := csv.NewReader(file).ReadAll()
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]string{
-			"error": err.Error(),
-		})
+		json.NewEncoder(w).Encode([]models.CSVRecord{})
 		return
 	}
 
-	var data []CSVRecord
-	for _, record := range records {
-		if len(record) >= 3 {
-			data = append(data, CSVRecord{
-				FiscalDriveNumber:    record[0],
-				FiscalDocumentNumber: record[1],
-				Items:                record[2],
+	var result []models.CSVRecord
+	for _, r := range records {
+		if len(r) >= 3 {
+			result = append(result, models.CSVRecord{
+				FiscalDriveNumber:    r[0],
+				FiscalDocumentNumber: r[1],
+				Items:                r[2],
 			})
 		}
 	}
 
-	json.NewEncoder(w).Encode(data)
+	json.NewEncoder(w).Encode(result)
 }

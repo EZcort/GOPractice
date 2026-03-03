@@ -1,14 +1,17 @@
-package files
+package utils
 
 import (
-	"context"
 	"encoding/csv"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
 	"strconv"
 	"strings"
-	"time"
+
+	constants "letsgo/pkg/constants"
+	db "letsgo/pkg/datasources"
+	models "letsgo/store/models"
 
 	"github.com/google/uuid"
 	"github.com/xuri/excelize/v2"
@@ -45,15 +48,21 @@ func ReadXLSXandMatch(filePath string, client *mongo.Client, dbName string) erro
 		}
 		value := uint64(rowValue)
 		strValue := strconv.FormatUint(value, 10)
-		docs, err := findInMongo(collection, strValue)
+		docs, err := db.FindInMongo(collection, strValue)
 		if err != nil {
 			continue
 		}
 
 		for _, doc := range docs {
-			err = saveToCSV(strValue, doc)
+			fileUuid4, err := saveToCSV(doc)
 			if err != nil {
 				log.Printf("Ошибка сохранения в CSV: %v\n", err)
+			}
+
+			docData, _ := doc["doc"].(bson.M)
+			err = appendToJSONL(fileUuid4, convertToString(docData["fiscalDriveNumber"]))
+			if err != nil {
+				log.Printf("Ошибка добавления в jsonL: %v", err)
 			}
 		}
 
@@ -62,67 +71,26 @@ func ReadXLSXandMatch(filePath string, client *mongo.Client, dbName string) erro
 	return nil
 }
 
-func findInMongo(collection *mongo.Collection, fdNumber string) ([]bson.M, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	pattern := "^" + fdNumber[:len(fdNumber)-2]
-	filter := bson.M{
-		"$and": []bson.M{
-			{"doc.fiscalDriveNumber": bson.M{
-				"$regex": pattern}},
-			// {"doc.DateTime": дата},
-		},
-	}
-
-	cursor, err := collection.Find(ctx, filter)
-	if err != nil {
-		return nil, err
-	}
-	defer cursor.Close(ctx)
-
-	var docs []bson.M
-	err = cursor.All(ctx, &docs)
-	if err != nil {
-		return nil, err
-	}
-	return docs, nil
-}
-
-func parseDate(doc bson.M) (time.Time, error) {
-	docField := doc["doc"].(bson.M)
-	dateTimeField := docField["dateTime"].(bson.M)
-	dateStr := dateTimeField["$date"].(string)
-	return time.Parse(time.RFC3339, dateStr)
-}
-
-// "dateTime": time.Now().UTC() - обратно в объект
-
-func saveToCSV(fdNumber string, doc bson.M) error {
-	workDir := "TMP/" + fdNumber
-	err := os.MkdirAll(workDir, 0755)
+func saveToCSV(doc bson.M) (string, error) {
+	err := os.MkdirAll("TMP", 0755)
 	if err != nil {
 		log.Printf("Ошибка создания директории: %v\n", err)
-		return err
+		return "", err
 	}
 
 	fileUuid4 := uuid.New().String()
-	fileName := workDir + "/" + fileUuid4 + ".csv"
+	fileName := "TMP/" + fileUuid4 + ".csv"
 	file, err := os.Create(fileName)
 	if err != nil {
 		log.Printf("Ошибка создания CSV: %v\n", err)
-		return err
+		return "", err
 	}
 	defer file.Close()
 
 	writer := csv.NewWriter(file)
 	defer writer.Flush()
 
-	docData, ok := doc["doc"].(bson.M)
-	if !ok {
-		return fmt.Errorf("Ошибка извлечения данных из doc\n")
-	}
-
+	docData, _ := doc["doc"].(bson.M)
 	fiscalDriveNumber := convertToString(docData["fiscalDriveNumber"])
 	fiscalDocumentNumber := convertToString(docData["fiscalDocumentNumber"])
 	itemsName := checkItems(docData)
@@ -136,7 +104,7 @@ func saveToCSV(fdNumber string, doc bson.M) error {
 	err = writer.Write(record)
 	if err != nil {
 		log.Printf("Ошибка записи в CSV: %v\n", err)
-		return err
+		return "", err
 	}
 
 	fmt.Printf("Документ %s сохранён\n", fileName)
@@ -144,8 +112,7 @@ func saveToCSV(fdNumber string, doc bson.M) error {
 	fmt.Printf("FiscalDriveNumber: %s\n", fiscalDriveNumber)
 	fmt.Printf("FiscalDocumentNumber: %s\n", fiscalDocumentNumber)
 	fmt.Printf("Items: %s\n", itemsName)
-	fmt.Println("-----------------------------------")
-	return nil
+	return fileUuid4, nil
 }
 
 func checkItems(doc bson.M) string {
@@ -180,16 +147,32 @@ func checkItems(doc bson.M) string {
 	return itemNames.String()
 }
 
-func convertToString(value interface{}) string {
-	switch v := value.(type) {
-	case int64:
-		return strconv.FormatInt(v, 10)
-	case float64:
-		if v == float64(int(v)) {
-			return strconv.Itoa(int(v))
-		}
-		return strconv.FormatFloat(v, 'f', -1, 64)
-	default:
-		return fmt.Sprintf("%v", v)
+func appendToJSONL(uuid string, fiscalDriveNumber string) error {
+	constants.JSONLMutex.Lock()
+	defer constants.JSONLMutex.Unlock()
+
+	record := models.JSONLRecord{
+		UUID:              uuid,
+		FiscalDriveNumber: fiscalDriveNumber,
 	}
+
+	recordJSON, err := json.Marshal(record)
+	if err != nil {
+		return err
+	}
+
+	file, err := os.OpenFile(constants.JSONLFilePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	_, err = file.Write(append(recordJSON, '\n'))
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("Запись %s добавлена в JSONL\n", uuid)
+	fmt.Println("-----------------------------------")
+	return nil
 }

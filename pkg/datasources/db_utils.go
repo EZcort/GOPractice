@@ -60,3 +60,30 @@ func InitMongoDB(client *mongo.Client, cfg *config.Config) error {
 	log.Println("Данные загружены")
 	return nil
 }
+
+func FindInMongo(collection *mongo.Collection, fdNumber string) ([]bson.M, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	pattern := "^" + fdNumber[:len(fdNumber)-2]
+	filter := bson.M{
+		"$and": []bson.M{
+			{"doc.fiscalDriveNumber": bson.M{
+				"$regex": pattern}},
+			// {"doc.DateTime": дата},
+		},
+	}
+
+	cursor, err := collection.Find(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+	defer cursor.Close(ctx)
+
+	var docs []bson.M
+	err = cursor.All(ctx, &docs)
+	if err != nil {
+		return nil, err
+	}
+	return docs, nil
+}
