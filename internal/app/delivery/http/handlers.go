@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
 
 	constants "letsgo/pkg/constants"
@@ -94,7 +93,7 @@ func GetCSV(w http.ResponseWriter, r *http.Request) {
 	}
 
 	uuid := parts[len(parts)-1]
-	csvPath := filepath.Join("TMP", uuid+".csv")
+	csvPath := "TMP/" + uuid + ".csv"
 
 	file, err := os.Open(csvPath)
 	if err != nil {
