@@ -3,7 +3,6 @@ package db_utils
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"letsgo/config"
 	"log"
 	"os"
@@ -63,8 +62,6 @@ func InitMongoDB(client *mongo.Client, cfg *config.Config) error {
 }
 
 func FindInMongo(collection *mongo.Collection, fiscalDriveNumber string, dateFrom, dateTo time.Time) ([]bson.M, error) {
-	fmt.Printf("Поиск по датам: %v, %v\n", dateFrom, dateTo)
-
 	filter := bson.M{
 		"doc.fiscalDriveNumber": fiscalDriveNumber,
 		"doc.dateTime": bson.M{

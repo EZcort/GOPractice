@@ -141,7 +141,7 @@ func GetUuids(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		filePath := "TMP" + entry.Name()
+		filePath := "TMP/" + entry.Name()
 		data, err := os.ReadFile(filePath)
 		if err != nil {
 			continue

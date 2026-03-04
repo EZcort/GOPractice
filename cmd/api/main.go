@@ -21,7 +21,7 @@ func main() {
 	}
 	defer client.Disconnect(context.Background())
 
-	db.InitMongoDB(client, cfg)
+	// db.InitMongoDB(client, cfg)
 
 	go fmt.Printf("Ручки:\nhttp://localhost:8080/api/activate\nhttp://localhost:8080/api/process/\nhttp://localhost:8080/api/uuids\nhttp://localhost:8080/api/CSV/\nhttp://localhost:8080/api/metrics\n")
 
