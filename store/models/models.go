@@ -4,6 +4,7 @@ type JSONRecord struct {
 	UUID              string `json:"uuid"`
 	FiscalDriveNumber string `json:"fiscalDriveNumber"`
 	Status            string `json:"status"`
+	Error             string `json:"error,omitempty"`
 }
 
 type CSVRecord struct {

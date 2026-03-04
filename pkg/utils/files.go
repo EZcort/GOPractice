@@ -56,6 +56,7 @@ func ReadXLSXandMatch(filePath string, client *mongo.Client, dbName string, date
 			err := SaveToCSVandJSON(doc)
 			if err != nil {
 				log.Printf("Ошибка сохранения в CSV или JSON: %v\n", err)
+				createErrorJSON(doc, err.Error())
 				continue
 			}
 		}
@@ -73,21 +74,37 @@ func SaveToCSVandJSON(doc bson.M) error {
 
 	fileUuid4 := uuid.New().String()
 
+	docData, _ := doc["doc"].(bson.M)
+	fiscalDriveNumber := convertToString(docData["fiscalDriveNumber"])
+	fiscalDocumentNumber := convertToString(docData["fiscalDocumentNumber"])
+	itemsName := checkItems(docData)
+
 	csvFileName := "TMP/" + fileUuid4 + ".csv"
-	csvFile, err := os.Create(csvFileName)
+	err = createCSVFile(csvFileName, fiscalDriveNumber, fiscalDocumentNumber, itemsName)
 	if err != nil {
-		log.Printf("Ошибка создания CSV: %v\n", err)
+		createJSONRecord(fileUuid4, fiscalDriveNumber, "failed", err.Error())
 		return err
+	}
+
+	err = createJSONRecord(fileUuid4, fiscalDriveNumber, "completed", "")
+	if err != nil {
+		log.Printf("Ошибка создания JSON: %v\n", err)
+		return err
+	}
+
+	printFileContents(fileUuid4, fiscalDriveNumber, fiscalDocumentNumber, itemsName, "completed")
+	return nil
+}
+
+func createCSVFile(fileName, fiscalDriveNumber, fiscalDocumentNumber, itemsName string) error {
+	csvFile, err := os.Create(fileName)
+	if err != nil {
+		return fmt.Errorf("ошибка создания CSV: %w", err)
 	}
 	defer csvFile.Close()
 
 	writer := csv.NewWriter(csvFile)
 	defer writer.Flush()
-
-	docData, _ := doc["doc"].(bson.M)
-	fiscalDriveNumber := convertToString(docData["fiscalDriveNumber"])
-	fiscalDocumentNumber := convertToString(docData["fiscalDocumentNumber"])
-	itemsName := checkItems(docData)
 
 	csvRecord := []string{
 		fiscalDriveNumber,
@@ -97,41 +114,57 @@ func SaveToCSVandJSON(doc bson.M) error {
 
 	err = writer.Write(csvRecord)
 	if err != nil {
-		log.Printf("Ошибка записи в CSV: %v\n", err)
-		return err
+		return fmt.Errorf("ошибка записи в CSV: %w", err)
 	}
 
-	jsonFileName := "TMP/" + fileUuid4 + ".json"
+	return nil
+}
+
+func createJSONRecord(uuid, fiscalDriveNumber, status, errorText string) error {
+	jsonFileName := "TMP/" + uuid + ".json"
+
 	jsonRecord := models.JSONRecord{
-		UUID:              fileUuid4,
+		UUID:              uuid,
 		FiscalDriveNumber: fiscalDriveNumber,
-		Status:            "processed",
+		Status:            status,
+		Error:             errorText,
 	}
 
 	jsonData, err := json.MarshalIndent(jsonRecord, "", "  ")
 	if err != nil {
-		log.Printf("Ошибка маршалинга JSON: %v\n", err)
-		return err
+		return fmt.Errorf("ошибка маршалинга JSON: %w", err)
 	}
 
 	err = os.WriteFile(jsonFileName, jsonData, 0644)
 	if err != nil {
-		log.Printf("Ошибка записи JSON файла: %v\n", err)
-		return err
+		return fmt.Errorf("ошибка записи JSON файла: %w", err)
 	}
 
-	fmt.Printf("Документ %s сохранён\n", csvFileName)
-	fmt.Printf("Документ %s сохранён\n", jsonFileName)
+	return nil
+}
+
+func createErrorJSON(doc bson.M, errorText string) {
+	fileUuid4 := uuid.New().String()
+	docData, _ := doc["doc"].(bson.M)
+	fiscalDriveNumber := convertToString(docData["fiscalDriveNumber"])
+
+	err := createJSONRecord(fileUuid4, fiscalDriveNumber, "failed", errorText)
+	if err != nil {
+		log.Printf("Ошибка создания JSON с ошибкой: %v\n", err)
+	}
+}
+
+func printFileContents(uuid, fiscalDriveNumber, fiscalDocumentNumber, itemsName, status string) {
+	fmt.Printf("Документ %s.csv сохранён\n", uuid)
+	fmt.Printf("Документ %s.json сохранён\n", uuid)
 	fmt.Printf("---Содержимое CSV файла---\n")
 	fmt.Printf("FiscalDriveNumber: %s\n", fiscalDriveNumber)
 	fmt.Printf("FiscalDocumentNumber: %s\n", fiscalDocumentNumber)
 	fmt.Printf("Items: %s\n", itemsName)
 	fmt.Printf("---Содержимое JSON файла---\n")
-	fmt.Printf("UUID: %s\n", jsonRecord.UUID)
-	fmt.Printf("FiscalDriveNumber: %s\n", jsonRecord.FiscalDriveNumber)
-	fmt.Printf("Status: %s\n", jsonRecord.Status)
-
-	return nil
+	fmt.Printf("UUID: %s\n", uuid)
+	fmt.Printf("FiscalDriveNumber: %s\n", fiscalDriveNumber)
+	fmt.Printf("Status: %s\n", status)
 }
 
 func checkItems(doc bson.M) string {
